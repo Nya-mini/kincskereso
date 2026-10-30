@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kincskereső Játék</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                }
+            }
+        }
+    </script>
+    <style>
+        /* A rácspontok vizuális megjelenítésére szolgáló stílusok */
+        .grid-point {
+            width: 10px;
+            height: 10px;
+            background-color: #3b82f6; /* Kék pontok (alap) */
+            border-radius: 50%;
+            cursor: pointer;
+            position: absolute;
+            transform: translate(-50%, -50%); /* Központosítás a koordinátán */
+            transition: all 0.1s;
+            z-index: 10;
+        }
+
+        .grid-point:hover {
+            background-color: #ef4444; /* Piros hover */
+            transform: translate(-50%, -50%) scale(1.5);
+            box-shadow: 0 0 8px rgba(255, 0, 0, 0.5);
+        }
+
+        /* Tippelt pontok (zöld) */
+        .guessed-point {
+            background-color: #10b981 !important; /* Zöld, ha tippelt */
+            opacity: 0.8;
+            box-shadow: 0 0 5px rgba(16, 185, 129, 0.8);
+            z-index: 20;
+            pointer-events: none; /* Ne lehessen újra tippelni */
+        }
+        
+        /* Jelölt pontok (sárga) */
+        .marked-point {
+            background-color: #fcd34d !important; /* Sárga jelölés */
+            opacity: 1 !important;
+            box-shadow: 0 0 10px #fcd34d !important;
+            border: 2px solid #b45309;
+            width: 12px;
+            height: 12px;
+            z-index: 40;
+        }
+
+        .distance-label {
+            position: absolute;
+            font-size: 10px;
+            font-weight: bold;
+            color: #10b981;
+            transform: translate(10px, -15px);
+            pointer-events: none;
+            z-index: 30;
+            background-color: rgba(255, 255, 255, 0.9);
+            padding: 1px 3px;
+            border-radius: 3px;
+            border: 1px solid #10b981;
+        }
+
+        .grid-container {
+            position: relative;
+            /* Változtatás: 90%-ról 100%-ra a jobb illeszkedés érdekében */
+            width: 100%; 
+            max-width: 600px;
+            aspect-ratio: 1 / 1;
+            margin: auto;
+            border: 2px solid #374151;
+            box-shadow: 0 10px 15px rgba(0, 0, 0, 0.1);
+            
+            /* Vízszintes és függőleges rácsvonalak hozzáadása CSS gradienttel */
+            background-color: white; 
+            --line-color: #e5e7eb; 
+            --line-width: 1px;
+            --grid-spacing: calc(100% / 12);
+            
+            background-image: 
+                /* Vízszintes vonalak (Y) */
+                linear-gradient(to top, var(--line-color) var(--line-width), transparent var(--line-width)),
+                /* Függőleges vonalak (X) */
+                linear-gradient(to right, var(--line-color) var(--line-width), transparent var(--line-width));
+                
+            background-size: var(--grid-spacing) var(--grid-spacing); 
+        }
+
+        .win-message {
+            animation: pulse 1s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.05); opacity: 0.9; }
+        }
+        
+        /* Módválasztó gombok stílusa */
+        .mode-button {
+            padding: 0.5rem 1rem;
+            border-radius: 0.5rem;
+            font-weight: 600;
+            transition: all 0.2s;
+            cursor: pointer;
+            flex-grow: 1;
+            text-align: center;
+        }
+        .mode-button-active {
+            background-color: #3b82f6; /* Kék */
+            color: white;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+        }
+        .mode-button-inactive {
+            background-color: #e5e7eb; /* Világosszürke */
+            color: #4b5563;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen p-4 sm:p-8 font-sans">
+
+    <div class="max-w-4xl mx-auto">
+        <h1 class="text-3xl font-bold text-gray-800 text-center mb-6 flex justify-center items-center gap-3">
+            💎 Kincskereső Játék 💎
+            <button onclick="openUsageModal()" class="px-3 py-1 bg-gray-200 text-gray-700 text-sm font-semibold rounded-full hover:bg-gray-300 transition duration-200 shadow">
+                Használat
+            </button>
+        </h1>
+        <p class="text-center text-gray-600 mb-8">
+            Kattints egy rácspontra a tippeléshez vagy a rácspont színezéséhez!
+        </p>
+
+        <div class="flex flex-col lg:flex-row gap-8">
+            
+            <!-- JÁTÉKTÉR --><div id="game-area" class="w-full lg:w-3/5">
+                
+                <!-- MÓDVÁLASZTÓ GOMBOK --><div class="flex gap-4 mb-4">
+                    <button id="guess-mode-button" class="mode-button mode-button-active" onclick="setMode('guess')">
+                        🎯 Tippelés (Távolság számítás)
+                    </button>
+                    <button id="mark-mode-button" class="mode-button mode-button-inactive" onclick="setMode('mark')">
+                        📝 Jelölés (Pont színezése)
+                    </button>
+                </div>
+
+                <div class="grid-container bg-white">
+                    <!-- A rácsvonalakat mostantól a grid-container háttérképe (CSS gradient) rajzolja. --></div>
+                
+                <div id="message-box" class="mt-4 p-4 rounded-lg bg-indigo-100 text-indigo-800 font-semibold shadow-inner text-center">
+                    Kezdjük! Válassz egy pontot a kattintással!
+                </div>
+            </div>
+
+            <!-- TIPPELÉS TÖRTÉNETE --><div class="w-full lg:w-2/5 p-6 bg-white rounded-xl shadow-lg h-fit">
+                <h2 class="text-xl font-semibold text-gray-700 mb-4 border-b pb-2">Kísérletek Története</h2>
+                <ul id="history-list" class="space-y-2 text-gray-600">
+                    <li class="text-sm italic">Még nem volt tipp.</li>
+                </ul>
+                <div class="mt-6 pt-4 border-t">
+                    <button onclick="resetGame()" class="w-full py-2 px-4 bg-red-500 hover:bg-red-600 text-white font-bold rounded-lg transition duration-200 shadow-md">
+                        Új Játék Kezdése
+                    </button>
+                </div>
+            </div>
+
+        </div>
+    </div>
+    
+    <!-- USAGE MODAL -->
+    <div id="usage-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4" onclick="closeUsageModal()">
+        <div class="bg-white p-8 rounded-xl shadow-2xl max-w-lg w-full transform transition-all duration-300 scale-95" onclick="event.stopPropagation()">
+            <h2 class="text-2xl font-bold text-gray-800 border-b pb-2 mb-4 flex justify-between items-center">
+                Játék Használata
+                <button onclick="closeUsageModal()" class="text-gray-400 hover:text-gray-600">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                </button>
+            </h2>
+            <ul class="space-y-4 text-gray-700">
+                <li>
+                    <span class="font-bold text-blue-600">1. A Játék Célja:</span> Találd meg az elrejtett kincset!
+                </li>
+                <li>
+                    <span class="font-bold text-blue-600">2. Módválasztás:</span> Két interakciós mód közül választhatsz:
+                    <ul class="list-disc list-inside ml-4 mt-1 space-y-1">
+                        <li><span class="font-bold">🎯 Tippelés (Alapértelmezett):</span> Kattints egy rácspontra. A rendszer kijelzi, milyen messze van a kincs. A távolságot <span class="font-bold">a rács vonalai mentén haladva számítja ki</span> (vízszintes lépések + függőleges lépések összege).</li>
+                        <li><span class="font-bold">📝 Jelölés:</span> Kattints egy nem tippelt pontra, hogy sárgával megjelöld vagy töröld a jelölést. Ez a funkció segít kizárni a lehetőségeket anélkül, hogy tippet fogyasztanál.</li>
+                    </ul>
+                </li>
+                <li>
+                    <span class="font-bold text-blue-600">3. Új Játék:</span> Az "Új Játék Kezdése" gombbal új kincs rejtőzik el, és a tábla törlődik.
+                </li>
+            </ul>
+            <button onclick="closeUsageModal()" class="mt-6 w-full py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg transition shadow">
+                Értem
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // --- JÁTÉK LOGIKA ---
+
+        // Konfiguráció
+        const GRID_SIZE = 12; // Rács mérete (0-tól 12-ig, 13 vonal)
+        const GRID_POINTS_COUNT = GRID_SIZE + 1; // 13
+
+        // Rejtett kincs koordinátái
+        let TREASURE_X;
+        let TREASURE_Y;
+        let isGameOver = false;
+        
+        // Játékmód
+        let currentMode = 'guess'; // 'guess' (tippelés) vagy 'mark' (jelölés)
+
+        // Vizuális elemek
+        const gridContainer = document.querySelector('.grid-container');
+        const historyList = document.getElementById('history-list');
+        const messageBox = document.getElementById('message-box');
+        const guessModeButton = document.getElementById('guess-mode-button');
+        const markModeButton = document.getElementById('mark-mode-button');
+        const usageModal = document.getElementById('usage-modal');
+
+
+        /**
+         * Megnyitja a használati útmutató modális ablakot.
+         */
+        function openUsageModal() {
+            usageModal.classList.remove('hidden');
+        }
+
+        /**
+         * Bezárja a használati útmutató modális ablakot.
+         */
+        function closeUsageModal() {
+            usageModal.classList.add('hidden');
+        }
+
+
+        /**
+         * Beállítja a játékmódot és frissíti a gombokat.
+         */
+        function setMode(mode) {
+            if (isGameOver) return;
+            currentMode = mode;
+            
+            if (mode === 'guess') {
+                guessModeButton.classList.add('mode-button-active');
+                guessModeButton.classList.remove('mode-button-inactive');
+                markModeButton.classList.remove('mode-button-active');
+                markModeButton.classList.add('mode-button-inactive');
+                messageBox.textContent = 'Mód: Tippelés. Válassz egy pontot a távolság kiszámításához.';
+            } else {
+                markModeButton.classList.add('mode-button-active');
+                markModeButton.classList.remove('mode-button-inactive');
+                guessModeButton.classList.remove('mode-button-active');
+                guessModeButton.classList.add('mode-button-inactive');
+                messageBox.textContent = 'Mód: Jelölés. Kattints egy nem tippelt pontra a színezéshez/törléshez.';
+            }
+        }
+
+        /**
+         * Kiszámítja a Manhattan (Taxi Geometria) távolságot.
+         */
+        function calculateManhattanDistance(x1, y1, x2, y2) {
+            return Math.abs(x1 - x2) + Math.abs(y2 - y1);
+        }
+
+        /**
+         * Rácspont generálása
+         */
+        function createGridPoint(x, y) {
+            const point = document.createElement('div');
+            point.className = 'grid-point';
+            point.style.left = `${(x / GRID_SIZE) * 100}%`;
+            point.style.top = `${((GRID_SIZE - y) / GRID_SIZE) * 100}%`; // Y tengely felülről lefelé nő
+            point.setAttribute('data-x', x);
+            point.setAttribute('data-y', y);
+            point.onclick = () => handleClick(x, y, point);
+            gridContainer.appendChild(point);
+        }
+
+        /**
+         * Fő kattintáskezelő, amely kezeli a módok közötti váltást.
+         */
+        function handleClick(x, y, pointElement) {
+            if (isGameOver) {
+                messageBox.textContent = `A játék véget ért! A kincs helye: (${TREASURE_X}, ${TREASURE_Y})`;
+                return;
+            }
+
+            if (currentMode === 'guess') {
+                handleGuessLogic(x, y, pointElement);
+            } else if (currentMode === 'mark') {
+                toggleMarking(pointElement);
+            }
+        }
+        
+        /**
+         * Kezeli a Tippelés (Guess) módot.
+         */
+        function handleGuessLogic(x, y, pointElement) {
+            if (pointElement.classList.contains('guessed-point')) {
+                messageBox.textContent = `Ezt a pontot (${x}, ${y}) már tippelted. Próbálj másik pontot!`;
+                return;
+            }
+
+            const distance = calculateManhattanDistance(TREASURE_X, TREASURE_Y, x, y);
+
+            // Történet frissítése
+            const historyItem = document.createElement('li');
+            historyItem.className = 'p-2 bg-gray-50 border border-gray-200 rounded-md flex justify-between items-center';
+            // Javítás: A Markdown formázást (**) lecseréljük HTML formázásra a szintaktikai hiba elkerülése érdekében
+            historyItem.innerHTML = `
+                <span>Tipp: <span class="font-bold">(${x}, ${y})</span></span>
+                <span class="${distance === 0 ? 'text-green-600 font-extrabold text-lg' : 'text-indigo-600 font-bold'}">
+                    Távolság: ${distance}
+                </span>
+            `;
+            if (historyList.querySelector('.italic')) {
+                historyList.innerHTML = '';
+            }
+            historyList.prepend(historyItem);
+
+            // Vizuális frissítés a rácson
+            pointElement.classList.add('guessed-point');
+            pointElement.classList.remove('marked-point'); // Eltávolítja a jelölést, ha volt
+
+            const distanceLabel = document.createElement('span');
+            distanceLabel.className = 'distance-label';
+            distanceLabel.textContent = distance;
+            pointElement.appendChild(distanceLabel);
+
+            // Nyertél?
+            if (distance === 0) {
+                isGameOver = true;
+                
+                // FIX: Kiegészítés. Ahhoz, hogy a távolság felirat (ami position: absolute) a ponton maradjon, 
+                // a pont elemnek meg kell tartania az abszolút pozícionálási kontextust.
+                // Ezt a position: absolute stílus beállításával biztosítjuk, mielőtt eltávolítanánk a 'grid-point' osztályt.
+                pointElement.style.position = 'absolute'; 
+
+                pointElement.classList.remove('guessed-point');
+                pointElement.classList.remove('grid-point');
+                pointElement.classList.add('treasure-found'); // Új osztály a kincs jelölésére
+                pointElement.style.backgroundColor = '#f59e0b'; // Arany szín
+                pointElement.style.width = '20px';
+                pointElement.style.height = '20px';
+                pointElement.style.zIndex = '50';
+                pointElement.style.boxShadow = '0 0 20px #f59e0b';
+                
+                messageBox.classList.remove('bg-indigo-100', 'text-indigo-800');
+                messageBox.classList.add('bg-green-600', 'text-white', 'win-message');
+                // Javítás: A Markdown formázást (**) lecseréljük HTML formázásra a szintaktikai hiba elkerülése érdekében
+                messageBox.innerHTML = `
+                    🎉 GRATULÁLOK! Megtaláltad a kincset a <span class="font-bold">(${x}, ${y})</span> ponton! 
+                    <br>
+                    ${historyList.children.length} kísérletből sikerült!
+                `;
+            } else {
+                messageBox.textContent = `A (${x}, ${y}) pont távolsága: ${distance} egység. Tippelj tovább!`;
+            }
+        }
+        
+        /**
+         * Kezeli a Jelölés (Mark) módot.
+         */
+        function toggleMarking(pointElement) {
+            // A már tippelt vagy megtalált pontokat nem jelölhetjük/jelölésüket nem törölhetjük
+            if (pointElement.classList.contains('guessed-point') || pointElement.classList.contains('treasure-found')) {
+                messageBox.textContent = `A már tippelt pontot (${pointElement.getAttribute('data-x')}, ${pointElement.getAttribute('data-y')}) nem lehet jelölni.`;
+                return;
+            }
+            
+            if (pointElement.classList.toggle('marked-point')) {
+                messageBox.textContent = `A (${pointElement.getAttribute('data-x')}, ${pointElement.getAttribute('data-y')}) pont jelölve lett (sárga).`;
+            } else {
+                messageBox.textContent = `A (${pointElement.getAttribute('data-x')}, ${pointElement.getAttribute('data-y')}) pont jelölése törölve lett.`;
+            }
+        }
+
+        /**
+         * Játék alaphelyzetbe állítása
+         */
+        function resetGame() {
+            // Véletlenszerű kincs elhelyezése
+            TREASURE_X = Math.floor(Math.random() * GRID_POINTS_COUNT); // 0-12
+            TREASURE_Y = Math.floor(Math.random() * GRID_POINTS_COUNT); // 0-12
+
+            isGameOver = false;
+            
+            // Visszaállítás Tippelés módra
+            setMode('guess');
+
+            // Játéktér tisztítása
+            const existingPoints = gridContainer.querySelectorAll('.grid-point, .guessed-point, .treasure-found');
+            existingPoints.forEach(p => p.remove());
+
+            // Történet tisztítása
+            historyList.innerHTML = '<li class="text-sm italic">Még nem volt tipp.</li>';
+
+            // Üzenet alaphelyzetbe állítása
+            messageBox.classList.remove('bg-green-600', 'text-white', 'win-message');
+            messageBox.classList.add('bg-indigo-100', 'text-indigo-800');
+            
+            // MÓDOSÍTVA: Helyesírás: "új kincset"
+            messageBox.textContent = 'Elrejtettem egy új kincset, kezdj el tippelni!';
+
+            // Új rácspontok generálása
+            for (let x = 0; x < GRID_POINTS_COUNT; x++) {
+                for (let y = 0; y < GRID_POINTS_COUNT; y++) {
+                    createGridPoint(x, y);
+                }
+            }
+
+            console.log(`[Rejtett kincs] Új helyszín: (${TREASURE_X}, ${TREASURE_Y})`);
+        }
+
+        // Első indítás
+        window.onload = resetGame;
+
+    </script>
+</body>
+</html>
